@@ -17,8 +17,10 @@ app.get('/', (req, res) => {
 // Step 2: MPesa STK Push endpoint
 app.post('/api/mpesa/stk-push', async (req, res) => {
   const { phone_number, amount, narrative } = req.body;
-  console.log('--- MPESA STK PUSH INITIATED ---');
+  console.log('==============================');
+  console.log('🚀 MPESA STK PUSH INITIATED 🚀');
   console.log('Received:', { phone_number, amount, narrative });
+  console.log('==============================');
   if (!phone_number || !amount) {
     console.error('Missing phone number or amount');
     return res.status(400).json({ error: 'Phone number and amount are required.' });
@@ -52,7 +54,7 @@ app.post('/api/mpesa/stk-push', async (req, res) => {
       PartyA: phone_number,
   PartyB: process.env.MPESA_TILL_NUMBER,
       PhoneNumber: phone_number,
-      CallBackURL: 'https://yourdomain.com/api/mpesa/callback', // Change to your actual callback URL
+  CallBackURL: 'https://kentune-mpesa-backend.vercel.app/api/mpesa/callback', // Live Vercel callback URL
       AccountReference: narrative || 'Kentunez Payment',
       TransactionDesc: narrative || 'Kentunez Payment'
     };
@@ -67,15 +69,76 @@ app.post('/api/mpesa/stk-push', async (req, res) => {
         }
       });
       console.log('STK Push Response:', stkRes.data);
-      res.json({ success: true, data: stkRes.data });
+      res.json({
+        success: true,
+        message: stkRes.data.CustomerMessage || 'STK Push request sent. Check your phone to complete payment.',
+        data: stkRes.data
+      });
     } catch (stkErr) {
-      console.error('STK Push Error:', stkErr.response?.data || stkErr.message);
-      res.status(500).json({ error: stkErr.response?.data || stkErr.message });
+      console.error('❌ STK Push Error:', stkErr.response?.data || stkErr.message);
+      res.status(500).json({
+        success: false,
+        error: stkErr.response?.data || stkErr.message,
+        message: 'Failed to initiate MPesa payment. Please try again or contact support.'
+      });
     }
   } catch (err) {
-    console.error('MPESA API Error:', err.response?.data || err.message);
-    res.status(500).json({ error: err.response?.data || err.message });
+    console.error('❌ MPESA API Error:', err.response?.data || err.message);
+    res.status(500).json({
+      success: false,
+      error: err.response?.data || err.message,
+      message: 'MPesa API error. Please try again or contact support.'
+    });
   }
+});
+
+
+
+// In-memory store for payment status (for demo; use DB in production)
+const paymentStatusStore = {};
+
+// MPesa payment callback endpoint
+app.post('/api/mpesa/callback', (req, res) => {
+  console.log('==============================');
+  console.log('MPESA CALLBACK EVENT RECEIVED');
+  console.log('Raw Body:', JSON.stringify(req.body, null, 2));
+  const callback = req.body.Body?.stkCallback;
+  let status = 'pending';
+  let checkoutId = null;
+  if (callback) {
+    checkoutId = callback.CheckoutRequestID;
+    console.log('Callback CheckoutRequestID:', checkoutId);
+    console.log('Callback ResultCode:', callback.ResultCode);
+    console.log('Callback ResultDesc:', callback.ResultDesc);
+    if (callback.ResultCode === 0) {
+      status = 'paid';
+      console.log('PAYMENT SUCCESSFUL for CheckoutRequestID:', checkoutId);
+    } else {
+      status = 'failed';
+      console.log('PAYMENT FAILED/DECLINED for CheckoutRequestID:', checkoutId);
+    }
+    // Store status by CheckoutRequestID
+    if (checkoutId) {
+      paymentStatusStore[checkoutId] = status;
+      console.log('Updated paymentStatusStore:', paymentStatusStore);
+    }
+  } else {
+    console.log('No valid callback found in body.');
+  }
+  res.json({ success: true, status, checkoutId, message: callback?.ResultDesc || 'Callback received.' });
+});
+
+
+// Endpoint to view all payment confirmations (for admin monitoring)
+app.get('/api/mpesa/payment-confirmations', (req, res) => {
+  res.json({ success: true, payments: paymentStatusStore });
+});
+
+// Endpoint for frontend to poll payment status
+app.get('/api/mpesa/payment-status/:checkoutId', (req, res) => {
+  const { checkoutId } = req.params;
+  const status = paymentStatusStore[checkoutId] || 'pending';
+  res.json({ success: true, status });
 });
 
 app.listen(PORT, () => {
