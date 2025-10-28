@@ -14,7 +14,9 @@ export default async function handler(req, res) {
     const doc = await db.collection('transactions').doc(checkoutId).get();
     if (doc.exists) {
       const data = doc.data();
-      const status = data.status || 'paid';
+      let status = 'pending';
+      if (data.status === 'paid') status = 'success';
+      else if (data.status === 'failed') status = 'failed';
       return res.status(200).json({ success: true, status });
     }
   } catch (e) {
@@ -22,6 +24,8 @@ export default async function handler(req, res) {
     console.error('Firestore error:', e);
   }
   // fallback to in-memory (should rarely be used)
-  const status = paymentStatusStore[checkoutId] || 'pending';
+  let status = paymentStatusStore[checkoutId] || 'pending';
+  if (status === 'paid') status = 'success';
+  else if (status === 'failed') status = 'failed';
   res.status(200).json({ success: true, status });
 }
